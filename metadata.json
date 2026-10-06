@@ -1,7 +1,10 @@
 {
   "name": "StrukScan OCR & Thermal Print Studio",
   "description": "Ekstraksi teks struk transaksi dan bukti pembayaran berbasis AI OCR dengan editor terstruktur dan format thermal printer Bluetooth.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "bluetooth",
+    "camera"
+  ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

@@ -15,10 +15,14 @@ import {
   User,
   Hash,
   X,
+  ArrowUp,
+  ArrowDown,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { ReceiptData } from '../types/receipt';
-import { formatCurrency, formatReceiptToThermalText } from '../utils/thermalFormatter';
+import { formatCurrency, formatReceiptToThermalText, ensureBase64LogoUrl } from '../utils/thermalFormatter';
 import { BarcodeRenderer, QrCodeRenderer } from './BarcodeRenderer';
+import { useBluetoothPrinter } from '../context/BluetoothPrinterContext';
 
 interface ThermalReceiptPreviewProps {
   receipt: ReceiptData;
@@ -31,6 +35,13 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
   onChange,
   onOpenBluetoothModal,
 }) => {
+  const {
+    isConnected: isBluetoothConnected,
+    connectedDeviceName,
+    printReceipt: printViaBluetooth,
+    isPrinting: isBluetoothPrinting,
+  } = useBluetoothPrinter();
+
   const [paperWidth, setPaperWidth] = useState<58 | 80>(58);
   const [viewMode, setViewMode] = useState<'paper' | 'text'>('paper');
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
@@ -39,10 +50,19 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
   const [invertHeader, setInvertHeader] = useState(false);
   const [copied, setCopied] = useState(false);
   const [downloadingImg, setDownloadingImg] = useState(false);
+  const [printSuccessToast, setPrintSuccessToast] = useState<string | null>(null);
 
   const receiptPaperRef = useRef<HTMLDivElement>(null);
 
   const thermalText = formatReceiptToThermalText(receipt, paperWidth === 58 ? 32 : 48);
+
+  const handleDirectBluetoothPrint = async () => {
+    const success = await printViaBluetooth(receipt, paperWidth === 58 ? 32 : 48);
+    if (success) {
+      setPrintSuccessToast(`Struk berhasil dicetak ke ${connectedDeviceName || 'printer'}! ✅`);
+      setTimeout(() => setPrintSuccessToast(null), 3500);
+    }
+  };
 
   const handleCopyText = async () => {
     try {
@@ -101,10 +121,10 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
           currentY += lineHeight;
         }
 
-        // Adjust canvas height to actual content
+        // Adjust canvas height to actual content with minimal bottom margin
         const finalCanvas = document.createElement('canvas');
         finalCanvas.width = width;
-        finalCanvas.height = currentY + 30 * scale;
+        finalCanvas.height = currentY + 8 * scale;
         const finalCtx = finalCanvas.getContext('2d');
         if (finalCtx) {
           finalCtx.drawImage(canvas, 0, 0);
@@ -131,11 +151,18 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
             <Printer className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-semibold text-slate-100 flex items-center gap-2">
+            <h3 className="font-semibold text-slate-100 flex items-center gap-2 flex-wrap">
               Pratinjau Struk Thermal
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-mono font-medium border border-emerald-500/30">
                 {paperWidth}mm ({paperWidth === 58 ? '32 Col' : '48 Col'})
               </span>
+              {isBluetoothConnected && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/40 shadow-sm animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <Bluetooth className="w-3 h-3 text-emerald-400" />
+                  <span>Printer: {connectedDeviceName}</span>
+                </span>
+              )}
             </h3>
             <p className="text-xs text-slate-400">
               Format siap cetak printer kasir Bluetooth (ESC/POS)
@@ -273,7 +300,7 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
             {/* Serrated Top Edge (Paper Tear Effect) */}
             <div className="w-full h-3 bg-[#fcfdfa] [mask-image:radial-gradient(circle_at_bottom,transparent_4px,#000_4px)] [mask-size:12px_12px] [mask-repeat:repeat-x] -mt-1.5 opacity-90 print:hidden" />
 
-            <div className="p-5 space-y-3">
+            <div className="px-4.5 pt-3.5 pb-2 space-y-2">
               {/* Header / Merchant */}
               {invertHeader ? (
                 <div className="bg-zinc-950 text-white p-3 text-center rounded -mx-2 mb-2">
@@ -281,7 +308,7 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
                     <div className="flex justify-center mb-1.5">
                       <div className="bg-white p-1 rounded">
                         <img
-                          src={receipt.merchant.logoUrl}
+                          src={ensureBase64LogoUrl(receipt.merchant.logoUrl)}
                           alt="Logo Toko"
                           className="max-h-12 max-w-[100px] object-contain filter grayscale contrast-150"
                         />
@@ -317,7 +344,7 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
                   {receipt.merchant.showLogo !== false && receipt.merchant.logoUrl ? (
                     <div className="flex justify-center mb-1.5">
                       <img
-                        src={receipt.merchant.logoUrl}
+                        src={ensureBase64LogoUrl(receipt.merchant.logoUrl)}
                         alt="Logo Toko"
                         className="max-h-14 max-w-[120px] object-contain filter grayscale contrast-150"
                       />
@@ -430,11 +457,15 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
 
               {/* Extra Fields Section */}
               {receipt.extraFields && receipt.extraFields.length > 0 && (
-                <div className="text-[11px] text-zinc-700 space-y-1 py-1 border-t border-dashed border-zinc-300">
+                <div className="text-[11px] text-zinc-700 space-y-1.5 py-1 border-t border-dashed border-zinc-300">
                   {receipt.extraFields.map((field, idx) => (
                     <div key={idx} className="flex justify-between items-start gap-2">
-                      <span className="text-zinc-500 shrink-0">{field.label}:</span>
-                      <span className="font-semibold text-right break-words">{field.value}</span>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-zinc-500 shrink-0">{field.label}:</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-semibold break-words">{field.value}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -540,42 +571,79 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
                 )}
               </div>
 
-              {/* Footer / QR / Barcode */}
-              <div className="border-t border-zinc-900 pt-3 text-center space-y-3">
-                {receipt.footer.notes && (
-                  <p className="text-[11px] text-zinc-700 leading-tight">
-                    {receipt.footer.notes}
-                  </p>
-                )}
-                {receipt.footer.policy && (
-                  <p className="text-[10px] text-zinc-500 leading-tight">
-                    {receipt.footer.policy}
-                  </p>
-                )}
-
-                {/* QR Code and Barcode */}
-                <div className="flex flex-col items-center justify-center gap-2 pt-1">
-                  {showQrCode && (
-                    <div className="flex flex-col items-center">
-                      <QrCodeRenderer
-                        value={receipt.transaction.invoiceNumber || receipt.footer.barcodeValue || 'STRUK-VERIFIED'}
-                        size={84}
-                      />
-                      <span className="text-[9px] text-zinc-500 mt-1">Pindai untuk verifikasi struk</span>
+              {/* Footer / QR / Barcode (Only rendered if there is content to save paper) */}
+              {(Boolean(receipt.footer.notes?.trim()) ||
+                Boolean(receipt.footer.policy?.trim()) ||
+                showQrCode ||
+                showBarcode) && (
+                <div className="border-t border-zinc-900 pt-2 text-center space-y-1.5">
+                  {receipt.footer.notes && (
+                    <div className="flex items-center justify-center gap-1 group/fn">
+                      <p className="text-[11px] text-zinc-700 leading-tight">
+                        {receipt.footer.notes}
+                      </p>
+                      {onChange && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onChange({
+                              ...receipt,
+                              footer: { ...receipt.footer, notes: '' },
+                            })
+                          }
+                          className="opacity-0 group-hover/fn:opacity-100 p-0.5 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-200 transition-all print:hidden"
+                          title="Hapus pesan penutup ini"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   )}
 
-                  {showBarcode && (
-                    <BarcodeRenderer
-                      value={receipt.footer.barcodeValue || receipt.transaction.invoiceNumber || '899120938472'}
-                    />
+                  {receipt.footer.policy && (
+                    <div className="flex items-center justify-center gap-1 group/fp">
+                      <p className="text-[10px] text-zinc-500 leading-tight">
+                        {receipt.footer.policy}
+                      </p>
+                      {onChange && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onChange({
+                              ...receipt,
+                              footer: { ...receipt.footer, policy: '' },
+                            })
+                          }
+                          className="opacity-0 group-hover/fp:opacity-100 p-0.5 rounded text-zinc-400 hover:text-red-600 hover:bg-zinc-200 transition-all print:hidden"
+                          title="Hapus kebijakan/catatan ini"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* QR Code and Barcode */}
+                  {(showQrCode || showBarcode) && (
+                    <div className="flex flex-col items-center justify-center gap-1.5 pt-0.5">
+                      {showQrCode && (
+                        <div className="flex flex-col items-center">
+                          <QrCodeRenderer
+                            value={receipt.transaction.invoiceNumber || receipt.footer.barcodeValue || 'STRUK-VERIFIED'}
+                            size={76}
+                          />
+                        </div>
+                      )}
+
+                      {showBarcode && (
+                        <BarcodeRenderer
+                          value={receipt.footer.barcodeValue || receipt.transaction.invoiceNumber || '899120938472'}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
-
-                <div className="text-[10px] font-bold text-zinc-400 tracking-wider">
-                  *** STRUK RESMI TERCETAK ***
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Serrated Bottom Edge (Paper Tear Effect) */}
@@ -594,6 +662,22 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Toast Notification on Successful Bluetooth Print */}
+      {printSuccessToast && (
+        <div className="mb-3 p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center justify-between animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-400" />
+            <span>{printSuccessToast}</span>
+          </div>
+          <button
+            onClick={() => setPrintSuccessToast(null)}
+            className="text-emerald-400 hover:text-emerald-200"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Action Footer Buttons */}
       <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
@@ -616,22 +700,51 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onOpenBluetoothModal}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-all shadow-md active:scale-95"
-          >
-            <Bluetooth className="w-4 h-4" />
-            <span>Koneksi Bluetooth Printer</span>
-          </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {isBluetoothConnected ? (
+            <>
+              <button
+                onClick={onOpenBluetoothModal}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition-all active:scale-95 shadow-sm"
+                title="Kelola Printer Bluetooth"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <Bluetooth className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{connectedDeviceName}</span>
+              </button>
 
-          <button
-            onClick={handlePrint}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all shadow-md active:scale-95"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Cetak Langsung</span>
-          </button>
+              <button
+                onClick={handleDirectBluetoothPrint}
+                disabled={isBluetoothPrinting}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-500/25 active:scale-95 disabled:opacity-50"
+              >
+                <Printer className="w-4 h-4" />
+                <span>
+                  {isBluetoothPrinting
+                    ? 'Sedang Mencetak...'
+                    : `Cetak ke ${connectedDeviceName} (1-Klik)`}
+                </span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={onOpenBluetoothModal}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-all shadow-md active:scale-95"
+              >
+                <Bluetooth className="w-4 h-4" />
+                <span>Koneksi Bluetooth Printer</span>
+              </button>
+
+              <button
+                onClick={handlePrint}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all shadow-md active:scale-95"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Cetak Browser</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

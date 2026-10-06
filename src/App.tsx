@@ -20,26 +20,31 @@ import {
   FileText,
   Store,
   Smartphone,
+  Settings,
+  Trash2,
 } from 'lucide-react';
 import { ReceiptData, StoreProfile } from './types/receipt';
 import { SAMPLE_RECEIPTS, SamplePreset } from './utils/sampleReceipts';
 import { ImageUploader } from './components/ImageUploader';
 import { ReceiptEditor } from './components/ReceiptEditor';
 import { ThermalReceiptPreview } from './components/ThermalReceiptPreview';
-import { RawTextCompare } from './components/RawTextCompare';
+import { RawTextCompare, RawOcrPanel, CleanStructuredPanel } from './components/RawTextCompare';
 import { BluetoothEscPosModal } from './components/BluetoothEscPosModal';
 import { StoreSettingsModal, STORE_PROFILE_STORAGE_KEY } from './components/StoreSettingsModal';
 import { AndroidInstallModal } from './components/AndroidInstallModal';
+import { useBluetoothPrinter } from './context/BluetoothPrinterContext';
 
 const STORAGE_KEY = 'strukscan_history_v1';
 
 export default function App() {
+  const { isConnected: isBluetoothConnected, connectedDeviceName } = useBluetoothPrinter();
+
   // Current active receipt
   const [receipt, setReceipt] = useState<ReceiptData>(SAMPLE_RECEIPTS[0].data);
   const [history, setHistory] = useState<ReceiptData[]>([]);
 
   // UI state
-  const [activeTab, setActiveTab] = useState<'editor' | 'scanner' | 'compare' | 'history'>('editor');
+  const [activeTab, setActiveTab] = useState<'editor' | 'scanner' | 'history'>('editor');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -47,40 +52,52 @@ export default function App() {
   const [isBluetoothModalOpen, setIsBluetoothModalOpen] = useState(false);
   const [isStoreSettingsOpen, setIsStoreSettingsOpen] = useState(false);
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState(false);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
 
   // Load history from localStorage on initial render
   useEffect(() => {
     try {
-      // Clean any legacy '1005' or '1005 SUKABUMI' in initial receipt state
-      setReceipt((prev) => {
-        if (prev.merchant.branch === '1005 SUKABUMI' || prev.merchant.branch === '1005') {
-          return { ...prev, merchant: { ...prev.merchant, branch: '' } };
+      // Helper to clean legacy unwanted text from receipt
+      const sanitizeReceipt = (item: ReceiptData): ReceiptData => {
+        let updated = { ...item };
+        // Clean legacy branch
+        if (updated?.merchant?.branch === '1005 SUKABUMI' || updated?.merchant?.branch === '1005') {
+          updated = { ...updated, merchant: { ...updated.merchant, branch: '' } };
         }
-        return prev;
-      });
+        // Clean legacy footer policy containing 'resmi' or 'tercetak'
+        if (updated?.footer?.policy) {
+          const p = updated.footer.policy.toLowerCase();
+          if (p.includes('resmi') || p.includes('tercetak') || p.includes('care center 165')) {
+            updated = { ...updated, footer: { ...updated.footer, policy: '' } };
+          }
+        }
+        // Clean legacy footer notes containing 'sah' or 'resmi'
+        if (updated?.footer?.notes) {
+          const n = updated.footer.notes.toLowerCase();
+          if (n.includes('bukti bayar sah') || n.includes('resmi')) {
+            updated = { ...updated, footer: { ...updated.footer, notes: 'Transaksi Berhasil' } };
+          }
+        }
+        return updated;
+      };
+
+      // Clean initial receipt state
+      setReceipt((prev) => sanitizeReceipt(prev));
 
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const cleanedList = parsed.map((item) => {
-            if (item?.merchant?.branch === '1005 SUKABUMI' || item?.merchant?.branch === '1005') {
-              return {
-                ...item,
-                merchant: { ...item.merchant, branch: '' },
-              };
-            }
-            return item;
-          });
+          const cleanedList = parsed.map(sanitizeReceipt);
           setHistory(cleanedList);
-          // If first item matches, make sure active receipt reflects clean branch
-          if (cleanedList[0]?.id === receipt.id || cleanedList[0]?.merchant?.name === 'BRImo') {
+          // Make sure active receipt reflects clean data
+          if (cleanedList[0]) {
             setReceipt(cleanedList[0]);
           }
         }
       } else {
         // Seed initial sample to history
-        setHistory([SAMPLE_RECEIPTS[0].data, SAMPLE_RECEIPTS[1].data]);
+        setHistory([sanitizeReceipt(SAMPLE_RECEIPTS[0].data), sanitizeReceipt(SAMPLE_RECEIPTS[1].data)]);
       }
     } catch (e) {
       console.error('Failed to load history', e);
@@ -101,12 +118,199 @@ export default function App() {
     });
   };
 
+  // Delete single receipt item from history
+  const handleDeleteHistoryItem = (id: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    setHistory((prev) => {
+      const updated = prev.filter((item) => item.id !== id);
+      try {
+        if (updated.length === 0) {
+          localStorage.removeItem(STORAGE_KEY);
+        } else {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        }
+      } catch (err) {
+        console.warn('LocalStorage save error', err);
+      }
+
+      // If active receipt is the one deleted, switch to next or reset
+      if (receipt.id === id) {
+        if (updated.length > 0) {
+          setReceipt(updated[0]);
+        } else {
+          // Get saved store profile to keep store name
+          let storeName = 'TOKO SAYA';
+          let storeProfile: any = {};
+          try {
+            const saved = localStorage.getItem('strukscan_store_profile_v1');
+            if (saved) {
+              storeProfile = JSON.parse(saved);
+              if (storeProfile.name) storeName = storeProfile.name;
+            }
+          } catch (e) {
+            console.warn('Failed to parse saved profile', e);
+          }
+
+          setReceipt({
+            id: `receipt-${Date.now()}`,
+            createdAt: new Date().toISOString(),
+            confidenceScore: 100,
+            documentType: 'receipt',
+            merchant: {
+              name: storeName,
+              branch: storeProfile.branch || '',
+              address: storeProfile.address || '',
+              phone: storeProfile.phone || '',
+              websiteOrTaxId: storeProfile.websiteOrTaxId || '',
+              logoUrl: storeProfile.logoUrl,
+              showLogo: storeProfile.showLogo !== false,
+            },
+            transaction: {
+              invoiceNumber: '',
+              date: new Date().toLocaleDateString('id-ID'),
+              time: new Date().toLocaleTimeString('id-ID', { hour12: false }).substring(0, 8),
+              cashier: storeProfile.defaultCashier || 'Kasir 01',
+              queueOrTable: '',
+            },
+            items: [],
+            financials: {
+              subtotal: 0,
+              taxPercent: 0,
+              taxAmount: 0,
+              serviceCharge: 0,
+              discount: 0,
+              rounding: 0,
+              grandTotal: 0,
+              currency: 'IDR',
+            },
+            payment: {
+              method: 'TUNAI',
+              amountPaid: 0,
+              change: 0,
+            },
+            footer: {
+              notes: storeProfile.defaultFooterNotes || 'Terima kasih atas kunjungan Anda!',
+              policy: storeProfile.defaultPolicy || 'Barang yang dibeli tidak dapat ditukar.',
+              barcodeValue: '',
+            },
+            rawExtractedText: 'Belum ada data hasil pindai OCR. Silakan unggah foto baru pada tab "Unggah Foto Baru" di atas.',
+          });
+        }
+      }
+
+      return updated;
+    });
+
+    setSuccessMessage('Struk berhasil dihapus dari riwayat! 🗑️');
+    setTimeout(() => setSuccessMessage(null), 2500);
+  };
+
+  // Delete all receipts from history
+  const handleDeleteAllHistory = () => {
+    setHistory([]);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (err) {
+      console.warn('LocalStorage clear error', err);
+    }
+
+    // Get saved store profile to keep store name
+    let storeName = 'TOKO SAYA';
+    let storeProfile: any = {};
+    try {
+      const saved = localStorage.getItem('strukscan_store_profile_v1');
+      if (saved) {
+        storeProfile = JSON.parse(saved);
+        if (storeProfile.name) storeName = storeProfile.name;
+      }
+    } catch (e) {
+      console.warn('Failed to parse saved profile', e);
+    }
+
+    // reset current receipt to clean empty initial state while preserving store name & profile
+    setReceipt({
+      id: `receipt-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      confidenceScore: 100,
+      documentType: 'receipt',
+      merchant: {
+        name: storeName,
+        branch: storeProfile.branch || '',
+        address: storeProfile.address || '',
+        phone: storeProfile.phone || '',
+        websiteOrTaxId: storeProfile.websiteOrTaxId || '',
+        logoUrl: storeProfile.logoUrl,
+        showLogo: storeProfile.showLogo !== false,
+      },
+      transaction: {
+        invoiceNumber: '',
+        date: new Date().toLocaleDateString('id-ID'),
+        time: new Date().toLocaleTimeString('id-ID', { hour12: false }).substring(0, 8),
+        cashier: storeProfile.defaultCashier || 'Kasir 01',
+        queueOrTable: '',
+      },
+      items: [],
+      financials: {
+        subtotal: 0,
+        taxPercent: 0,
+        taxAmount: 0,
+        serviceCharge: 0,
+        discount: 0,
+        rounding: 0,
+        grandTotal: 0,
+        currency: 'IDR',
+      },
+      payment: {
+        method: 'TUNAI',
+        amountPaid: 0,
+        change: 0,
+      },
+      footer: {
+        notes: storeProfile.defaultFooterNotes || 'Terima kasih atas kunjungan Anda!',
+        policy: storeProfile.defaultPolicy || 'Barang yang dibeli tidak dapat ditukar.',
+        barcodeValue: '',
+      },
+      rawExtractedText: 'Belum ada data hasil pindai OCR. Silakan unggah foto baru pada tab "Unggah Foto Baru" di atas.',
+    });
+
+    setShowDeleteAllConfirm(false);
+    setSuccessMessage('Seluruh riwayat struk & dokumen berhasil dibersihkan! 🗑️');
+    setTimeout(() => setSuccessMessage(null), 2500);
+  };
+
   // OCR Processing handler
   const handleProcessImage = (extracted: ReceiptData) => {
-    setReceipt(extracted);
-    saveToHistory(extracted);
+    // Keep the current store / merchant profile (never take store name from raw OCR)
+    let currentStore = receipt.merchant;
+    try {
+      const savedProfile = localStorage.getItem(STORE_PROFILE_STORAGE_KEY);
+      if (savedProfile) {
+        const parsed = JSON.parse(savedProfile);
+        currentStore = {
+          name: parsed.name || receipt.merchant.name,
+          branch: parsed.branch !== undefined ? parsed.branch : receipt.merchant.branch,
+          address: parsed.address !== undefined ? parsed.address : receipt.merchant.address,
+          phone: parsed.phone !== undefined ? parsed.phone : receipt.merchant.phone,
+          websiteOrTaxId: parsed.websiteOrTaxId !== undefined ? parsed.websiteOrTaxId : receipt.merchant.websiteOrTaxId,
+          logoUrl: parsed.logoUrl !== undefined ? parsed.logoUrl : receipt.merchant.logoUrl,
+          showLogo: parsed.showLogo !== undefined ? parsed.showLogo : receipt.merchant.showLogo,
+        };
+      }
+    } catch {
+      // fallback to current receipt.merchant
+    }
+
+    const finalReceipt: ReceiptData = {
+      ...extracted,
+      merchant: currentStore,
+    };
+
+    setReceipt(finalReceipt);
+    saveToHistory(finalReceipt);
     setActiveTab('editor');
-    setSuccessMessage('Struk berhasil dipindai dan diekstrak menjadi teks terstruktur (Tesseract OCR)!');
+    setSuccessMessage('Struk berhasil dipindai dan diekstrak menjadi teks terstruktur!');
     setTimeout(() => setSuccessMessage(null), 4000);
   };
 
@@ -125,7 +329,14 @@ export default function App() {
         }),
       });
 
-      const result = await response.json();
+      let result: any = {};
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text || `HTTP error ${response.status}`);
+      }
 
       if (!response.ok || !result.success) {
         throw new Error(result.error || 'Gagal merevisi data struk.');
@@ -246,30 +457,10 @@ export default function App() {
             <button
               onClick={() => setIsStoreSettingsOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700/60 transition-all shadow-sm active:scale-95"
-              title="Atur Nama Toko, Cabang, Alamat & Logo Struk"
+              title="Pengaturan Profil Toko, Logo Struk & Bluetooth Printer"
             >
-              <Store className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Profil & Logo Toko</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('scanner')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm active:scale-95 ${
-                activeTab === 'scanner'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60'
-              }`}
-            >
-              <Scan className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Pindai Foto</span>
-            </button>
-
-            <button
-              onClick={() => setIsBluetoothModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-xs font-semibold border border-blue-500/30 transition-all active:scale-95"
-            >
-              <Bluetooth className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden md:inline">Bluetooth ESC/POS</span>
+              <Settings className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Pengaturan Toko</span>
             </button>
 
             <button
@@ -324,7 +515,7 @@ export default function App() {
               }`}
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>Editor & Pratinjau Struk</span>
+              <span>Workspace Struk & OCR</span>
             </button>
 
             <button
@@ -337,18 +528,6 @@ export default function App() {
             >
               <Scan className="w-4 h-4" />
               <span>Unggah Foto Baru</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('compare')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap ${
-                activeTab === 'compare'
-                  ? 'bg-slate-800 text-emerald-400 font-semibold border border-slate-700 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-              }`}
-            >
-              <FileCode className="w-4 h-4" />
-              <span>Teks Mentah OCR</span>
             </button>
 
             <button
@@ -370,25 +549,21 @@ export default function App() {
           </div>
         </div>
 
-        {/* Tab 1: Workspace (Split Screen: Left Editor, Right Live Thermal Receipt) */}
+        {/* Tab 1: Workspace (Unified single page workspace!) */}
         {activeTab === 'editor' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left Column: Structured Form Editor (7 cols) */}
-            <div className="lg:col-span-7">
-              <ReceiptEditor
+            {/* Left Column (6 cols): Hasil Pindai Mentah (Raw OCR) & Pratinjau Struk Thermal */}
+            <div className="lg:col-span-6 space-y-6">
+              {/* Hasil Pindai Mentah (Raw OCR) */}
+              <RawOcrPanel
                 receipt={receipt}
                 onChange={(updated) => {
                   setReceipt(updated);
                   saveToHistory(updated);
                 }}
-                onAiRecalculate={handleAiRecalculate}
-                isAiProcessing={isAiProcessing}
-                onOpenStoreSettings={() => setIsStoreSettingsOpen(true)}
               />
-            </div>
 
-            {/* Right Column: Live Thermal Receipt Preview (5 cols) */}
-            <div className="lg:col-span-5 sticky top-20">
+              {/* Pratinjau Struk Thermal */}
               <ThermalReceiptPreview
                 receipt={receipt}
                 onChange={(updated) => {
@@ -397,6 +572,40 @@ export default function App() {
                 }}
                 onOpenBluetoothModal={() => setIsBluetoothModalOpen(true)}
               />
+            </div>
+
+            {/* Right Column (6 cols): Hasil Ekstraksi Bersih & Terstruktur (Edit Manual Di Sini) */}
+            <div className="lg:col-span-6 space-y-6">
+              {/* Hasil Ekstraksi Bersih & Terstruktur */}
+              <CleanStructuredPanel
+                receipt={receipt}
+                onChange={(updated) => {
+                  setReceipt(updated);
+                  saveToHistory(updated);
+                }}
+              />
+            </div>
+
+            {/* Bottom Section (12 cols): Editor Data Terstruktur (Edit Manual Di Sini) */}
+            <div className="lg:col-span-12 pt-6 border-t border-slate-800/80">
+              <div className="bg-slate-900/40 rounded-2xl p-5 lg:p-6 border border-slate-800 space-y-4">
+                <div className="flex items-center gap-2 pb-2.5 border-b border-slate-800">
+                  <Settings className="w-4.5 h-4.5 text-emerald-400" />
+                  <span className="font-bold text-xs uppercase tracking-wider text-slate-300">
+                    Editor Data Terstruktur (Pengaturan Rinci & Tabular)
+                  </span>
+                </div>
+                <ReceiptEditor
+                  receipt={receipt}
+                  onChange={(updated) => {
+                    setReceipt(updated);
+                    saveToHistory(updated);
+                  }}
+                  onAiRecalculate={handleAiRecalculate}
+                  isAiProcessing={isAiProcessing}
+                  onOpenStoreSettings={() => setIsStoreSettingsOpen(true)}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -413,36 +622,33 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 3: Compare Raw OCR */}
-        {activeTab === 'compare' && (
-          <div className="max-w-5xl mx-auto space-y-6">
-            <RawTextCompare receipt={receipt} />
-          </div>
-        )}
-
         {/* Tab 4: History */}
         {activeTab === 'history' && (
           <div className="max-w-5xl mx-auto space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
               <div>
-                <h3 className="font-semibold text-slate-100 text-sm">
-                  Riwayat Dokumen & Struk Terpindai
+                <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                  <History className="w-4 h-4 text-emerald-400" />
+                  <span>Riwayat Dokumen & Struk Terpindai</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
+                    {history.length}
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Klik pada struk untuk memuat kembali ke editor dan mencetak ulang
+                  Pilih struk untuk memuat kembali ke editor, atau klik tombol tong sampah untuk menghapus.
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  if (confirm('Bersihkan semua riwayat struk?')) {
-                    setHistory([]);
-                    localStorage.removeItem(STORAGE_KEY);
-                  }
-                }}
-                className="text-xs text-slate-400 hover:text-red-400 transition-colors px-2 py-1 rounded-lg"
-              >
-                Hapus Semua
-              </button>
+              {history.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteAllConfirm(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold border border-red-500/30 transition-all active:scale-95 shadow-xs"
+                  title="Hapus semua riwayat struk"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus Semua Riwayat</span>
+                </button>
+              )}
             </div>
 
             {history.length > 0 ? (
@@ -454,19 +660,30 @@ export default function App() {
                       setReceipt(item);
                       setActiveTab('editor');
                     }}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${
+                    className={`group relative p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${
                       item.id === receipt.id
                         ? 'bg-slate-900 border-emerald-500/60 shadow-lg shadow-emerald-950/30'
                         : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
-                      <span className="font-bold text-sm text-slate-100 truncate">
+                      <span className="font-bold text-sm text-slate-100 truncate flex-1">
                         {item.merchant.name || 'Struk Tanpa Nama'}
                       </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-emerald-400 font-mono shrink-0">
-                        {item.documentType}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-emerald-400 font-mono">
+                          {item.documentType}
+                        </span>
+                        {/* Individual Delete Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteHistoryItem(item.id, e)}
+                          className="p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/20 transition-all active:scale-90"
+                          title="Hapus struk ini dari riwayat"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <p className="text-xs text-slate-400 mb-2 truncate">
@@ -485,8 +702,11 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-400 text-xs">
-                Belum ada riwayat struk tersimpan. Mulai dengan memindai foto atau memilih preset sampel.
+              <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-400 text-xs space-y-2">
+                <p className="font-medium text-slate-300">Belum ada riwayat struk tersimpan.</p>
+                <p className="text-[11px] text-slate-500">
+                  Mulai dengan memindai foto atau memilih preset sampel pada tab Unggah Foto.
+                </p>
               </div>
             )}
           </div>
@@ -506,6 +726,7 @@ export default function App() {
         <StoreSettingsModal
           currentReceipt={receipt}
           onSaveProfile={handleSaveStoreProfile}
+          onOpenBluetoothModal={() => setIsBluetoothModalOpen(true)}
           onClose={() => setIsStoreSettingsOpen(false)}
         />
       )}
@@ -515,6 +736,41 @@ export default function App() {
         <AndroidInstallModal
           onClose={() => setIsAndroidModalOpen(false)}
         />
+      )}
+
+      {/* Delete All History Confirmation Modal */}
+      {showDeleteAllConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-100 text-sm">Hapus Semua Riwayat?</h4>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Tindakan ini akan menghapus permanen <strong>{history.length}</strong> data struk dari penyimpanan lokal browser Anda.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllConfirm(false)}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAllHistory}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow-md active:scale-95 transition-all"
+              >
+                Ya, Hapus Semua
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Footer */}

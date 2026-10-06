@@ -71,8 +71,8 @@ export const SAMPLE_RECEIPTS: SamplePreset[] = [
         approvalCode: '2D5959BF10383261',
       },
       footer: {
-        notes: 'Transaksi Berhasil. Simpan bukti ini sebagai bukti bayar sah.',
-        policy: 'Layanan BPJS Kesehatan Care Center 165',
+        notes: 'Transaksi Berhasil',
+        policy: '',
         barcodeValue: '226595393257',
       },
       rawExtractedText: `BRImo\nTransaksi Berhasil\n\nTanggal 06 Oct 2026 | 13:14:57 WIB\nNomor Referensi 226595393257\nSumber Dana RIZKI PERDIAN\n\n4090 xxx Kxxx DG\nNama Pelanggan MUHAMAD YUSUP\nNomor Pembayaran 8888801665704452\nID Transaksi 2D5959BF10383261\nInstitusi BPJS Kesehatan\nKeterangan 1005 SUKABUMI\nLokasi 1005 SUKABUMI\nJumlah Keluarga 3\nNominal Rp105.000\nBiaya Admin Rp2.500\nTotal Tagihan Rp107.500`,
@@ -441,7 +441,7 @@ Biaya Admin: Rp 0,00`,
       },
       footer: {
         notes: 'Tarimo Kasih Banyak Sanak. Salero Kito Rancak Bana!',
-        policy: 'Tercetak otomatis melalui QRIS Payment Gateway',
+        policy: '',
         barcodeValue: 'ID1020048192837',
       },
       rawExtractedText: `RM PADANG SALERO KITO

@@ -168,45 +168,164 @@ export function formatReceiptToThermalText(receipt: ReceiptData, width: 32 | 48 
     lines.push(padJustify('Approval Code:', receipt.payment.approvalCode, width));
   }
 
-  lines.push(doubleDivider);
+  // 6. Footer & Notes (only render if there is actual content, to save paper)
+  const hasFooterNotes = Boolean(receipt.footer.notes && receipt.footer.notes.trim());
+  const hasFooterPolicy = Boolean(receipt.footer.policy && receipt.footer.policy.trim());
+  const hasBarcode = Boolean(receipt.footer.barcodeValue && receipt.footer.barcodeValue.trim());
 
-  // 6. Footer & Notes
-  if (receipt.footer.notes) {
-    lines.push(padCenter(receipt.footer.notes, width));
+  if (hasFooterNotes || hasFooterPolicy || hasBarcode) {
+    lines.push(doubleDivider);
+    if (hasFooterNotes) {
+      lines.push(padCenter(receipt.footer.notes!.trim(), width));
+    }
+    if (hasFooterPolicy) {
+      lines.push(padCenter(receipt.footer.policy!.trim(), width));
+    }
+    if (hasBarcode) {
+      lines.push(padCenter(`* ${receipt.footer.barcodeValue!.trim()} *`, width));
+    }
   }
-  if (receipt.footer.policy) {
-    lines.push(padCenter(receipt.footer.policy, width));
-  }
-  if (receipt.footer.barcodeValue) {
-    lines.push(padCenter(`* ${receipt.footer.barcodeValue} *`, width));
-  }
-
-  lines.push('');
-  lines.push(padCenter('=== STRUK RESMI ===', width));
 
   return lines.join('\n');
 }
 
+export interface EscPosOptions {
+  cutPaper?: boolean;
+  feedLines?: number;
+  logoBytes?: Uint8Array | null;
+}
+
+/**
+ * Convert an HTMLImageElement to 1-bit bitonal ESC/POS raster bitmap command bytes
+ */
+export function convertImageToEscPos(img: HTMLImageElement, targetWidth = 160): Uint8Array {
+  // Ensure width is a multiple of 8 (e.g. 160, 240)
+  const width = Math.floor(targetWidth / 8) * 8;
+  const scale = width / img.width;
+  const height = Math.round(img.height * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new Uint8Array(0);
+
+  // Handle transparency by filling white background
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  // Convert pixels to bitonal bytes (8 horizontal dots per byte)
+  const bytesWidth = width / 8;
+  const escPosData = new Uint8Array(bytesWidth * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < bytesWidth; x++) {
+      let byteVal = 0;
+      for (let bit = 0; x * 8 + bit < width && bit < 8; bit++) {
+        const pxIdx = (y * width + (x * 8 + bit)) * 4;
+        const r = data[pxIdx];
+        const g = data[pxIdx + 1];
+        const b = data[pxIdx + 2];
+        const a = data[pxIdx + 3];
+
+        // Lightness / luma thresholding
+        const luma = a < 128 ? 255 : 0.299 * r + 0.587 * g + 0.114 * b;
+        if (luma < 128) {
+          byteVal |= (1 << (7 - bit));
+        }
+      }
+      escPosData[y * bytesWidth + x] = byteVal;
+    }
+  }
+
+  // GS v 0 0 xL xH yL yH (0x1D 0x76 0x30 0x00 ...)
+  const xL = bytesWidth & 0xFF;
+  const xH = (bytesWidth >> 8) & 0xFF;
+  const yL = height & 0xFF;
+  const yH = (height >> 8) & 0xFF;
+
+  const header = new Uint8Array([0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
+
+  // Command wrappers:
+  // ESC a 1 (Align center) : 0x1B, 0x61, 0x01
+  // ESC a 0 (Align left) : 0x1B, 0x61, 0x00
+  // LF (line feed) : 0x0a
+  const alignCenter = new Uint8Array([0x1b, 0x61, 0x01]);
+  const alignLeft = new Uint8Array([0x1b, 0x61, 0x00, 0x0a]);
+
+  const finalBytes = new Uint8Array(alignCenter.length + header.length + escPosData.length + alignLeft.length);
+  finalBytes.set(alignCenter, 0);
+  finalBytes.set(header, alignCenter.length);
+  finalBytes.set(escPosData, alignCenter.length + header.length);
+  finalBytes.set(alignLeft, alignCenter.length + header.length + escPosData.length);
+
+  return finalBytes;
+}
+
 /**
  * Generate binary ESC/POS byte sequence for Bluetooth Thermal Printers
+ * Supports paper-saving options (feedLines & cutPaper toggle).
+ * Portable 58mm bluetooth printers should have cutPaper: false to avoid excessive blank feed.
  */
-export function generateEscPosBytes(receipt: ReceiptData, width: 32 | 48 = 32): Uint8Array {
-  const text = formatReceiptToThermalText(receipt, width);
+export function generateEscPosBytes(
+  receipt: ReceiptData,
+  width: 32 | 48 = 32,
+  options: EscPosOptions = {}
+): Uint8Array {
+  const { cutPaper = false, feedLines = 2, logoBytes = null } = options;
+  let text = formatReceiptToThermalText(receipt, width);
+
+  // If we have actual graphic logo bytes, strip the text fallback "[ LOGO TOKO ]"
+  if (logoBytes && logoBytes.length > 0) {
+    const logoPlaceholder = padCenter('[ LOGO TOKO ]', width);
+    text = text.replace(logoPlaceholder, '');
+    text = text.replace(/^\n+/, ''); // strip leading empty lines
+  }
+
   const encoder = new TextEncoder();
   const textBytes = encoder.encode(text);
 
   // Standard ESC/POS commands:
   // ESC @ (Initialize printer) : 0x1B, 0x40
   // ESC t 0 (Character code table PC437) : 0x1B, 0x74, 0x00
-  // GS V 65 0 (Cut paper) : 0x1D, 0x56, 0x41, 0x00
   const init = new Uint8Array([0x1b, 0x40, 0x1b, 0x74, 0x00]);
-  const feedAndCut = new Uint8Array([0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x41, 0x00]);
 
-  const totalLength = init.length + textBytes.length + feedAndCut.length;
+  // Construct trailing commands (feed and optional cut)
+  const trailingBytes: number[] = [];
+  const numFeeds = Math.max(0, Math.min(6, feedLines));
+  for (let i = 0; i < numFeeds; i++) {
+    trailingBytes.push(0x0a);
+  }
+
+  if (cutPaper) {
+    trailingBytes.push(0x1d, 0x56, 0x41, 0x00);
+  }
+
+  const trailing = new Uint8Array(trailingBytes);
+
+  const hasLogo = logoBytes && logoBytes.length > 0;
+  const logoLen = hasLogo ? logoBytes!.length : 0;
+
+  const totalLength = init.length + logoLen + textBytes.length + trailing.length;
   const result = new Uint8Array(totalLength);
-  result.set(init, 0);
-  result.set(textBytes, init.length);
-  result.set(feedAndCut, init.length + textBytes.length);
+
+  let offset = 0;
+  result.set(init, offset);
+  offset += init.length;
+
+  if (hasLogo) {
+    result.set(logoBytes!, offset);
+    offset += logoBytes!.length;
+  }
+
+  result.set(textBytes, offset);
+  offset += textBytes.length;
+
+  result.set(trailing, offset);
 
   return result;
 }
@@ -224,3 +343,28 @@ export function bytesToHexString(bytes: Uint8Array): string {
   }
   return hexArray.join(' ');
 }
+
+/**
+ * Ensure a logo URL (especially raw SVG XML data URLs) is robustly encoded in Base64
+ * to avoid canvas security/loading issues in some browsers or environments.
+ */
+export function ensureBase64LogoUrl(url: string | undefined | null): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith('data:image/svg+xml')) {
+    if (url.includes('utf8,') || !url.includes('base64,')) {
+      try {
+        const parts = url.split(',');
+        if (parts.length > 1) {
+          const rawContent = decodeURIComponent(parts[1]);
+          // Standard web-safe base64 conversion
+          const base64Content = btoa(unescape(encodeURIComponent(rawContent)));
+          return `data:image/svg+xml;base64,${base64Content}`;
+        }
+      } catch (e) {
+        console.error('Failed to convert SVG to base64:', e);
+      }
+    }
+  }
+  return url;
+}
+

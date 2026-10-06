@@ -19,12 +19,17 @@ import {
   Pill,
   Wrench,
   UtensilsCrossed,
+  Settings,
+  Bluetooth,
+  Printer,
 } from 'lucide-react';
 import { StoreProfile, MerchantInfo, ReceiptData } from '../types/receipt';
+import { useBluetoothPrinter } from '../context/BluetoothPrinterContext';
 
 interface StoreSettingsModalProps {
   currentReceipt: ReceiptData;
   onSaveProfile: (profile: StoreProfile, applyToCurrent: boolean) => void;
+  onOpenBluetoothModal?: () => void;
   onClose: () => void;
 }
 
@@ -43,8 +48,13 @@ const PRESET_LOGOS = [
 export const StoreSettingsModal: React.FC<StoreSettingsModalProps> = ({
   currentReceipt,
   onSaveProfile,
+  onOpenBluetoothModal,
   onClose,
 }) => {
+  const {
+    isConnected: isBluetoothConnected,
+    connectedDeviceName,
+  } = useBluetoothPrinter();
   // Load saved profile or initialize from current receipt
   const [profile, setProfile] = useState<StoreProfile>(() => {
     try {
@@ -134,14 +144,14 @@ export const StoreSettingsModal: React.FC<StoreSettingsModalProps> = ({
         <div className="flex items-center justify-between p-4.5 border-b border-slate-800 bg-slate-950/60">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <Store className="w-5 h-5" />
+              <Settings className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-semibold text-slate-100 text-sm">
-                Pengaturan Profil Toko & Logo Struk
+              <h3 className="font-bold text-slate-100 text-sm">
+                Pengaturan Toko, Logo & Printer
               </h3>
               <p className="text-[11px] text-slate-400">
-                Atur nama toko, cabang, alamat, kontak, dan logo yang dicetak di atas nama toko
+                Atur profil toko, logo header struk, serta koneksi printer Bluetooth thermal
               </p>
             </div>
           </div>
@@ -155,6 +165,48 @@ export const StoreSettingsModal: React.FC<StoreSettingsModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-5 overflow-y-auto space-y-5 text-xs">
+          {/* SECTION: BLUETOOTH PRINTER MANAGEMENT */}
+          <div className="p-4 rounded-xl bg-slate-950/90 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bluetooth className="w-4 h-4 text-blue-400" />
+                <span className="font-bold text-slate-200 text-xs block">
+                  Koneksi Printer Bluetooth Thermal (ESC/POS)
+                </span>
+              </div>
+              <span
+                className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${
+                  isBluetoothConnected
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}
+              >
+                {isBluetoothConnected ? `Terhubung: ${connectedDeviceName}` : 'Belum Terhubung'}
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Hubungkan aplikasi dengan printer Bluetooth thermal (58mm/80mm) untuk cetak struk otomatis tanpa kabel.
+            </p>
+
+            {onOpenBluetoothModal && (
+              <div className="pt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenBluetoothModal();
+                  }}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-all active:scale-95 shadow-sm"
+                >
+                  <Bluetooth className="w-4 h-4" />
+                  <span>
+                    {isBluetoothConnected ? 'Kelola / Ganti Printer Bluetooth' : 'Hubungkan Printer Bluetooth'}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           {/* SECTION 1: LOGO UPLOAD & PREVIEW */}
           <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3.5">
             <div className="flex items-center justify-between">
