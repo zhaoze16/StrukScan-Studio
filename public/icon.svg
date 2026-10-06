@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064e3b" />
+      <stop offset="50%" stop-color="#0f766e" />
+      <stop offset="100%" stop-color="#042f2e" />
+    </linearGradient>
+    <linearGradient id="receiptGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f1f5f9" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Thermal Printer Body -->
+  <g filter="url(#shadow)">
+    <!-- Main base -->
+    <rect x="86" y="210" width="340" height="200" rx="36" fill="#0f172a" stroke="#10b981" stroke-width="4" />
+    <!-- Paper exit slot -->
+    <rect x="136" y="210" width="240" height="14" rx="7" fill="#020617" />
+    <!-- LED indicator -->
+    <circle cx="130" cy="360" r="10" fill="#10b981" />
+    <circle cx="130" cy="360" r="16" fill="#10b981" opacity="0.3" />
+    <!-- Feed button -->
+    <rect x="330" y="348" width="56" height="24" rx="12" fill="#1e293b" stroke="#334155" stroke-width="2" />
+  </g>
+
+  <!-- Paper Receipt scrolling out -->
+  <g filter="url(#shadow)">
+    <path d="M 148,214 L 148,96 Q 166,108 184,96 Q 202,108 220,96 Q 238,108 256,96 Q 274,108 292,96 Q 310,108 328,96 Q 346,108 364,96 L 364,214 Z" fill="url(#receiptGrad)" />
+    
+    <!-- Receipt printed lines -->
+    <!-- Barcode lines -->
+    <rect x="180" y="120" width="4" height="24" fill="#0f172a" />
+    <rect x="188" y="120" width="8" height="24" fill="#0f172a" />
+    <rect x="200" y="120" width="3" height="24" fill="#0f172a" />
+    <rect x="207" y="120" width="10" height="24" fill="#0f172a" />
+    <rect x="221" y="120" width="4" height="24" fill="#0f172a" />
+    <rect x="229" y="120" width="7" height="24" fill="#0f172a" />
+    <rect x="240" y="120" width="5" height="24" fill="#0f172a" />
+    <rect x="249" y="120" width="9" height="24" fill="#0f172a" />
+    <rect x="262" y="120" width="3" height="24" fill="#0f172a" />
+    <rect x="269" y="120" width="8" height="24" fill="#0f172a" />
+    <rect x="281" y="120" width="4" height="24" fill="#0f172a" />
+    <rect x="289" y="120" width="12" height="24" fill="#0f172a" />
+    <rect x="305" y="120" width="5" height="24" fill="#0f172a" />
+    <rect x="314" y="120" width="8" height="24" fill="#0f172a" />
+    <rect x="326" y="120" width="4" height="24" fill="#0f172a" />
+
+    <!-- Text simulation lines -->
+    <rect x="176" y="156" width="160" height="6" rx="3" fill="#64748b" />
+    <rect x="176" y="168" width="110" height="6" rx="3" fill="#94a3b8" />
+    <rect x="176" y="180" width="130" height="6" rx="3" fill="#64748b" />
+    <rect x="176" y="192" width="80" height="6" rx="3" fill="#10b981" />
+  </g>
+
+  <!-- Bluetooth Sparkle badge on the bottom right -->
+  <g transform="translate(350, 310)">
+    <circle cx="28" cy="28" r="34" fill="#2563eb" stroke="#ffffff" stroke-width="3" />
+    <!-- Bluetooth Rune -->
+    <path d="M 28,12 L 28,44 L 38,34 L 18,22 L 38,22 L 28,12" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>
