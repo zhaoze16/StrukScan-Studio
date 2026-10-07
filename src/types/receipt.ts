@@ -92,5 +92,5 @@ export interface ReceiptData {
   footer: ReceiptFooter;
   rawExtractedText?: string;
   originalImage?: string;
-  extraFields?: { label: string; value: string }[];
+  extraFields?: { label: string; value: string; align?: 'split' | 'center' }[];
 }

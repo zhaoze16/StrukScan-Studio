@@ -350,7 +350,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
           </div>
 
           {/* Preset Samples */}
-          <div>
+          {/* <div className="hidden">
             <span className="text-xs text-slate-400 font-semibold block mb-2">
               Atau Pilih Contoh Contoh Struk / Bukti Transfer:
             </span>
@@ -371,7 +371,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 </button>
               ))}
             </div>
-          </div>
+          </div> */}
         </div>
       )}
 

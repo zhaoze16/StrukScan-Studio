@@ -263,14 +263,14 @@ export const ReceiptEditor: React.FC<ReceiptEditorProps> = ({
             <span>Hitung Ulang</span>
           </button>
 
-          <button
+          {/* <button
             onClick={() => setShowAiModal(true)}
             disabled={isAiProcessing}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-50"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-200" />
             <span>{isAiProcessing ? 'Memproses...' : 'AI Assistant'}</span>
-          </button>
+          </button> */}
         </div>
       </div>
 

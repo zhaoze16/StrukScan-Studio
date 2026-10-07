@@ -223,7 +223,7 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
       </div>
 
       {/* Secondary Customization Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 py-3 px-1 text-xs text-slate-300">
+      <div className="hidden flex-wrap items-center justify-between gap-2 py-3 px-1 text-xs text-slate-300">
         <div className="flex items-center gap-4 flex-wrap">
           <label className="flex items-center gap-1.5 cursor-pointer select-none">
             <input
@@ -458,16 +458,39 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
               {/* Extra Fields Section */}
               {receipt.extraFields && receipt.extraFields.length > 0 && (
                 <div className="text-[11px] text-zinc-700 space-y-1.5 py-1 border-t border-dashed border-zinc-300">
-                  {receipt.extraFields.map((field, idx) => (
-                    <div key={idx} className="flex justify-between items-start gap-2">
-                      <div className="flex items-center gap-1 min-w-0">
-                        <span className="text-zinc-500 shrink-0">{field.label}:</span>
+                  {receipt.extraFields.map((field, idx) => {
+                    const isCenter = field.align === 'center';
+                    const displayValue = field.value || '';
+                    
+                    if (isCenter) {
+                      let text = '';
+                      if (field.label && field.value) {
+                        text = `${field.label}: ${field.value}`;
+                      } else if (field.label) {
+                        text = field.label;
+                      } else if (field.value) {
+                        text = field.value;
+                      }
+                      
+                      if (!text) return null;
+                      return (
+                        <div key={idx} className="text-center py-0.5">
+                          <span className="font-semibold break-words">{text}</span>
+                        </div>
+                      );
+                    }
+                    
+                    return (
+                      <div key={idx} className="flex justify-between items-start gap-2">
+                        <div className="flex items-center gap-1 min-w-0">
+                          {field.label && <span className="text-zinc-500 shrink-0">{field.label}:</span>}
+                        </div>
+                        <div className="text-right">
+                          <span className="font-semibold break-words">{displayValue}</span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="font-semibold break-words">{field.value}</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -623,8 +646,8 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
                     </div>
                   )}
 
-                  {/* QR Code and Barcode */}
-                  {(showQrCode || showBarcode) && (
+                  {/* QR Code and Barcode (Removed) */}
+                  {/* (showQrCode || showBarcode) && (
                     <div className="flex flex-col items-center justify-center gap-1.5 pt-0.5">
                       {showQrCode && (
                         <div className="flex flex-col items-center">
@@ -641,7 +664,7 @@ export const ThermalReceiptPreview: React.FC<ThermalReceiptPreviewProps> = ({
                         />
                       )}
                     </div>
-                  )}
+                  ) */}
                 </div>
               )}
             </div>

@@ -374,15 +374,94 @@ export default function App() {
     setTimeout(() => setSuccessMessage(null), 3000);
   };
 
-  // Export structured JSON
-  const handleExportJson = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(receipt, null, 2));
+  // Activate PPOB mode helper
+  const handleActivatePpobMode = () => {
+    const plnPreset = SAMPLE_RECEIPTS.find((r) => r.id === 'sample-pln');
+    if (plnPreset) {
+      // Get saved store profile to keep store name
+      let storeName = 'LOKET PPOB MANDIRI';
+      let storeProfile: any = {};
+      try {
+        const saved = localStorage.getItem('strukscan_store_profile_v1');
+        if (saved) {
+          storeProfile = JSON.parse(saved);
+          if (storeProfile.name) storeName = storeProfile.name;
+        }
+      } catch (e) {
+        console.warn('Failed to parse saved profile', e);
+      }
+
+      const loadedData: ReceiptData = {
+        ...plnPreset.data,
+        id: `REC-PLN-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        merchant: {
+          ...plnPreset.data.merchant,
+          name: storeName,
+          branch: storeProfile.branch || plnPreset.data.merchant.branch,
+          address: storeProfile.address || plnPreset.data.merchant.address,
+          phone: storeProfile.phone || plnPreset.data.merchant.phone,
+          logoUrl: storeProfile.logoUrl,
+          showLogo: storeProfile.showLogo !== false,
+        },
+        transaction: {
+          ...plnPreset.data.transaction,
+          date: new Date().toLocaleDateString('id-ID'),
+          time: new Date().toLocaleTimeString('id-ID', { hour12: false }).substring(0, 8),
+        }
+      };
+      setReceipt(loadedData);
+      saveToHistory(loadedData);
+      setActiveTab('editor');
+      setSuccessMessage('Mode PPOB Aktif! Template PLN Listrik Pintar berhasil dimuat! ⚡');
+      setTimeout(() => setSuccessMessage(null), 3500);
+    }
+  };
+
+  // Export full data backup (history + templates)
+  const handleExportBackup = () => {
+    const historyData = localStorage.getItem(STORAGE_KEY);
+    const templatesData = localStorage.getItem('strukscan_metadata_templates_v1');
+    const storeProfileData = localStorage.getItem('strukscan_store_profile_v1');
+
+    const backup = {
+      history: historyData ? JSON.parse(historyData) : [],
+      templates: templatesData ? JSON.parse(templatesData) : [],
+      storeProfile: storeProfileData ? JSON.parse(storeProfileData) : {},
+      exportedAt: new Date().toISOString()
+    };
+
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `struk-${receipt.transaction.invoiceNumber || 'data'}.json`);
+    downloadAnchor.setAttribute('download', `strukscan-backup-${new Date().toISOString().split('T')[0]}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    setSuccessMessage('Backup data berhasil diekspor! 💾');
+    setTimeout(() => setSuccessMessage(null), 3000);
+  };
+
+  // Import data backup
+  const handleImportBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const backup = JSON.parse(e.target?.result as string);
+        if (backup.history) localStorage.setItem(STORAGE_KEY, JSON.stringify(backup.history));
+        if (backup.templates) localStorage.setItem('strukscan_metadata_templates_v1', JSON.stringify(backup.templates));
+        if (backup.storeProfile) localStorage.setItem('strukscan_store_profile_v1', JSON.stringify(backup.storeProfile));
+        
+        window.location.reload(); // Refresh to apply changes
+      } catch (err) {
+        setErrorMessage('Gagal mengimpor file backup: format tidak valid.');
+        setTimeout(() => setErrorMessage(null), 3000);
+      }
+    };
+    reader.readAsText(file);
   };
 
   // Store Profile & Logo Save Handler
@@ -432,10 +511,6 @@ export default function App() {
                 <h1 className="font-extrabold text-base lg:text-lg tracking-tight bg-gradient-to-r from-slate-100 via-emerald-200 to-teal-300 bg-clip-text text-transparent">
                   StrukScan Studio
                 </h1>
-                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/30">
-                  <Sparkles className="w-3 h-3" />
-                  AI OCR • Bluetooth Print
-                </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
                 Ekstraksi Struk Belanja & Bukti Pembayaran ke Format Printer Thermal
@@ -463,13 +538,23 @@ export default function App() {
               <span>Pengaturan Toko</span>
             </button>
 
-            <button
-              onClick={handleExportJson}
-              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-all active:scale-95"
-              title="Ekspor Data JSON"
-            >
-              <Download className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1.5 ml-2">
+              <label
+                className="cursor-pointer p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-all active:scale-95"
+                title="Impor Backup Data"
+              >
+                <Upload className="w-4 h-4" />
+                <input type="file" accept=".json" onChange={handleImportBackup} className="hidden" />
+              </label>
+
+              <button
+                onClick={handleExportBackup}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-all active:scale-95"
+                title="Ekspor Seluruh Backup Data"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -543,9 +628,11 @@ export default function App() {
             </button>
           </div>
 
-          <div className="hidden lg:flex items-center gap-2 text-xs text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Pratinjau Otomatis Sinkron</span>
+          <div className="flex items-center gap-2.5">
+            <div className="hidden lg:flex items-center gap-2 text-xs text-slate-400 border-l border-slate-800/80 pl-2.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Sinkron</span>
+            </div>
           </div>
         </div>
 

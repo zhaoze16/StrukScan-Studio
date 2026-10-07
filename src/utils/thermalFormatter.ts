@@ -113,7 +113,23 @@ export function formatReceiptToThermalText(receipt: ReceiptData, width: 32 | 48 
   if (receipt.extraFields && receipt.extraFields.length > 0) {
     lines.push(lineDivider);
     for (const field of receipt.extraFields) {
-      lines.push(padJustify(field.label + ':', field.value, width));
+      if (field.align === 'center') {
+        let text = '';
+        if (field.label && field.value) {
+          text = `${field.label}: ${field.value}`;
+        } else if (field.label) {
+          text = field.label;
+        } else if (field.value) {
+          text = field.value;
+        }
+        if (text) {
+          lines.push(padCenter(text, width));
+        }
+      } else {
+        // default: split (kiri-kanan)
+        const displayVal = field.value || '';
+        lines.push(padJustify(field.label ? `${field.label}:` : '', displayVal, width));
+      }
     }
   }
 

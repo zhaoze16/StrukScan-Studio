@@ -55,7 +55,11 @@ export const BluetoothEscPosModal: React.FC<BluetoothEscPosModalProps> = ({
     connect,
     disconnect,
     printReceipt,
-    printViaRawBT,
+    // Native properties
+    isNative,
+    pairedDevices,
+    connectNativeDevice,
+    refreshNativeDevices,
   } = useBluetoothPrinter();
 
   const [copiedHex, setCopiedHex] = useState(false);
@@ -120,6 +124,20 @@ export const BluetoothEscPosModal: React.FC<BluetoothEscPosModalProps> = ({
   };
 
   const handleSendPrintJob = async () => {
+    // Check if running in Tauri environment
+    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+      try {
+        const invoke = (window as any).__TAURI__.invoke;
+        const bytesArray = Array.from(escPosBytes);
+        await invoke('print_raw_bytes', { bytes: bytesArray });
+        console.log("Cetak langsung berhasil via Tauri!");
+        return; // Skip standard Bluetooth logic
+      } catch (error) {
+        console.error("Gagal mencetak via Tauri:", error);
+      }
+    }
+    
+    // Fallback to standard Bluetooth logic
     await printReceipt(receipt, paperWidth, logoBytes);
   };
 
@@ -239,49 +257,156 @@ export const BluetoothEscPosModal: React.FC<BluetoothEscPosModalProps> = ({
             </div>
           </div>
 
-          {/* Action Row */}
-          <div className="flex flex-wrap items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400 text-xs">Lebar Kertas:</span>
-              <div className="inline-flex p-0.5 rounded-lg bg-slate-950 border border-slate-800">
+          {isNative ? (
+            /* NATIVE CORDOVA PRINTER SELECTION */
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+                  <Bluetooth className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                  <span>Daftar Perangkat Bluetooth Terpasang (Paired):</span>
+                </span>
                 <button
-                  onClick={() => setPaperWidth(32)}
-                  className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
-                    paperWidth === 32 ? 'bg-blue-600 text-white' : 'text-slate-400'
-                  }`}
+                  type="button"
+                  onClick={refreshNativeDevices}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold border border-slate-700/60 transition-all active:scale-95"
                 >
-                  58mm (32 col)
-                </button>
-                <button
-                  onClick={() => setPaperWidth(48)}
-                  className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
-                    paperWidth === 48 ? 'bg-blue-600 text-white' : 'text-slate-400'
-                  }`}
-                >
-                  80mm (48 col)
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Segarkan</span>
                 </button>
               </div>
-            </div>
 
-            <button
-              onClick={connect}
-              disabled={isConnecting}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-white font-semibold transition-all active:scale-95 disabled:opacity-50 shadow-sm ${
-                isConnected
-                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                  : 'bg-blue-600 hover:bg-blue-500'
-              }`}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isConnecting ? 'animate-spin' : ''}`} />
-              <span>
-                {isConnecting
-                  ? 'Menghubungkan...'
-                  : isConnected
-                  ? 'Ganti Printer Bluetooth'
-                  : 'Hubungkan Web Bluetooth'}
-              </span>
-            </button>
-          </div>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar">
+                {pairedDevices && pairedDevices.length > 0 ? (
+                  pairedDevices.map((dev) => {
+                    const isDevConnected = isConnected && (connectedDeviceName === dev.name || connectedDeviceName === dev.address);
+                    return (
+                      <div
+                        key={dev.address}
+                        className={`flex items-center justify-between p-2 rounded-xl border transition-all ${
+                          isDevConnected
+                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 shadow-sm'
+                            : 'bg-slate-900 border-slate-800/80 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex flex-col">
+                          <span className="font-bold text-xs text-slate-100">{dev.name || 'Printer Bluetooth'}</span>
+                          <span className="text-[9px] text-slate-500 font-mono">{dev.address}</span>
+                        </div>
+                        {isDevConnected ? (
+                          <button
+                            type="button"
+                            onClick={disconnect}
+                            className="px-2.5 py-1 rounded-lg bg-red-600/15 hover:bg-red-600/30 text-red-400 text-[10px] font-bold border border-red-500/20 transition-all active:scale-95"
+                          >
+                            Putuskan
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => connectNativeDevice(dev.address)}
+                            disabled={isConnecting}
+                            className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold shadow-sm transition-all active:scale-95 disabled:opacity-50"
+                          >
+                            Hubungkan
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="p-4 text-center border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs">
+                    Tidak ada perangkat Bluetooth terpasang. Pastikan Bluetooth HP Anda aktif dan printer sudah dipasangkan (paired) di pengaturan Android.
+                  </div>
+                )}
+              </div>
+
+              {/* Action Row inside Native mode for paper width */}
+              <div className="flex items-center gap-2 pt-1.5 border-t border-slate-900">
+                <span className="text-slate-400 text-xs">Lebar Kertas:</span>
+                <div className="inline-flex p-0.5 rounded-lg bg-slate-950 border border-slate-800">
+                  <button
+                    onClick={() => setPaperWidth(32)}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
+                      paperWidth === 32 ? 'bg-blue-600 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    58mm (32 col)
+                  </button>
+                  <button
+                    onClick={() => setPaperWidth(48)}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
+                      paperWidth === 48 ? 'bg-blue-600 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    80mm (48 col)
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* STANDARD WEB BLUETOOTH BLE */
+            <>
+              <div className="p-3.5 rounded-xl bg-blue-950/20 border border-blue-500/30 text-blue-200 space-y-1.5 leading-relaxed">
+                <div className="flex items-center gap-2 font-bold text-xs text-blue-300">
+                  <HelpCircle className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span>Info Penting Printer PPOB (Tipe POS-58, PT-210, dll.):</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Printer thermal Bluetooth PPOB menggunakan protokol <strong className="text-blue-300">Bluetooth Classic (SPP)</strong>, sedangkan browser web standar hanya diizinkan mengakses <strong className="text-emerald-400">Bluetooth Low Energy (BLE)</strong>.
+                </p>
+                <p className="text-[11px] text-slate-300">
+                  Oleh karena itu, printer thermal PPOB Anda tidak muncul di daftar pencarian "Hubungkan Web Bluetooth BLE" bawaan Chrome.
+                </p>
+                <p className="text-[11px] text-slate-300">
+                  <strong>Catatan:</strong> Koneksi Native Bluetooth Classic otomatis aktif saat aplikasi dijalankan di dalam aplikasi Android Capacitor Anda!
+                </p>
+              </div>
+
+              {/* Action Row */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 text-xs">Lebar Kertas:</span>
+                  <div className="inline-flex p-0.5 rounded-lg bg-slate-950 border border-slate-800">
+                    <button
+                      onClick={() => setPaperWidth(32)}
+                      className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
+                        paperWidth === 32 ? 'bg-blue-600 text-white' : 'text-slate-400'
+                      }`}
+                    >
+                      58mm (32 col)
+                    </button>
+                    <button
+                      onClick={() => setPaperWidth(48)}
+                      className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
+                        paperWidth === 48 ? 'bg-blue-600 text-white' : 'text-slate-400'
+                      }`}
+                    >
+                      80mm (48 col)
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  onClick={connect}
+                  disabled={isConnecting}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-white font-semibold transition-all active:scale-95 disabled:opacity-50 shadow-sm ${
+                    isConnected
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                      : 'bg-blue-600 hover:bg-blue-500'
+                  }`}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isConnecting ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isConnecting
+                      ? 'Menghubungkan...'
+                      : isConnected
+                      ? 'Ganti Printer Bluetooth'
+                      : 'Hubungkan Web Bluetooth BLE'}
+                  </span>
+                </button>
+              </div>
+            </>
+          )}
 
           {/* PENGATURAN HEMAT KERTAS & SISA KERTAS BAWAH */}
           <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
@@ -378,7 +503,7 @@ export const BluetoothEscPosModal: React.FC<BluetoothEscPosModalProps> = ({
           {/* OPSI CETAK ALTERNATIF KHUSUS LINUX */}
           <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
             <span className="font-bold text-slate-200 block text-xs flex items-center gap-1.5">
-              <Laptop className="w-3.5 h-3.5 text-emerald-400" />
+              <Laptop className="w-3.5 h-3.5 text-blue-400" />
               <span>Opsi Cetak Alternatif di Linux (Port Driver Desktop):</span>
             </span>
 

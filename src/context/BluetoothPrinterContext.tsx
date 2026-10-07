@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { ReceiptData } from '../types/receipt';
-import { generateEscPosBytes, formatReceiptToThermalText } from '../utils/thermalFormatter';
+import { generateEscPosBytes } from '../utils/thermalFormatter';
 
 export interface BluetoothPrinterContextType {
   device: any | null;
@@ -19,19 +19,26 @@ export interface BluetoothPrinterContextType {
   connect: () => Promise<boolean>;
   disconnect: () => void;
   printReceipt: (receipt: ReceiptData, customWidth?: 32 | 48, logoBytes?: Uint8Array | null) => Promise<boolean>;
-  printViaRawBT: (receipt: ReceiptData, customWidth?: 32 | 48) => void;
   setStatusMessage: (msg: string) => void;
+  // Cordova bluetooth-serial specific properties for Android/Capacitor PPOB direct printing
+  isNative: boolean;
+  pairedDevices: { name: string; address: string; id?: string }[];
+  connectNativeDevice: (address: string) => Promise<boolean>;
+  refreshNativeDevices: () => void;
 }
 
 const BluetoothPrinterContext = createContext<BluetoothPrinterContextType | null>(null);
 
 export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Web Bluetooth state
   const [device, setDevice] = useState<any | null>(null);
+  const [printCharacteristic, setPrintCharacteristic] = useState<any | null>(null);
+
+  // Common state
   const [connectedDeviceName, setConnectedDeviceName] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
-  const [printCharacteristic, setPrintCharacteristic] = useState<any | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>('Siap terhubung dengan printer Bluetooth');
   const [isPolicyBlocked, setIsPolicyBlocked] = useState<boolean>(false);
   const [paperWidth, setPaperWidth] = useState<32 | 48>(32);
@@ -50,6 +57,57 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
       return 2;
     }
   });
+
+  // Cordova Native State
+  const [isNative, setIsNative] = useState<boolean>(false);
+  const [pairedDevices, setPairedDevices] = useState<{ name: string; address: string; id?: string }[]>([]);
+
+  // 1. Detect Cordova Native bluetoothSerial on Mount
+  useEffect(() => {
+    const btSerial = (window as any).bluetoothSerial;
+    if (btSerial) {
+      setIsNative(true);
+      setStatusMessage('Menggunakan Driver Native Bluetooth Classic (Cordova Plugin).');
+      
+      // Load paired devices on startup
+      btSerial.list(
+        (devices: any[]) => {
+          setPairedDevices(devices);
+        },
+        (err: any) => {
+          console.warn('Failed to list native paired devices on init:', err);
+        }
+      );
+
+      // Check if previously connected native printer exists
+      const savedAddress = localStorage.getItem('connected_native_address');
+      if (savedAddress) {
+        btSerial.isConnected(
+          () => {
+            setIsConnected(true);
+            const dev = pairedDevices.find((d) => d.address === savedAddress);
+            setConnectedDeviceName(dev ? dev.name : 'Printer Bluetooth Classic');
+            setStatusMessage('Printer Bluetooth PPOB terhubung kembali.');
+          },
+          () => {
+            // Auto reconnect native printer
+            btSerial.connect(
+              savedAddress,
+              () => {
+                setIsConnected(true);
+                const dev = pairedDevices.find((d) => d.address === savedAddress);
+                setConnectedDeviceName(dev ? dev.name : 'Printer Bluetooth Classic');
+                setStatusMessage('Printer Bluetooth PPOB berhasil terhubung kembali secara native.');
+              },
+              () => {
+                localStorage.removeItem('connected_native_address');
+              }
+            );
+          }
+        );
+      }
+    }
+  }, [pairedDevices.length]);
 
   const setCutPaper = (val: boolean) => {
     setCutPaperState(val);
@@ -70,7 +128,7 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
     }
   };
 
-  // Handle auto-cleanup when device disconnects externally
+  // Auto-cleanup for Web Bluetooth GATT disconnection
   const handleDisconnected = useCallback(() => {
     setIsConnected(false);
     setPrintCharacteristic(null);
@@ -79,22 +137,74 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
 
   useEffect(() => {
     if (!device) return;
-
     device.addEventListener('gattserverdisconnected', handleDisconnected);
     return () => {
       device.removeEventListener('gattserverdisconnected', handleDisconnected);
     };
   }, [device, handleDisconnected]);
 
-  // Connect or pair Bluetooth thermal printer
+  // --- NATIVE CORDOVA METHOD IMPLEMENTATIONS ---
+  const refreshNativeDevices = () => {
+    const btSerial = (window as any).bluetoothSerial;
+    if (btSerial) {
+      btSerial.list(
+        (devices: any[]) => {
+          setPairedDevices(devices);
+          setStatusMessage(`Ditemukan ${devices.length} perangkat Bluetooth thermal terpasang.`);
+        },
+        (err: any) => {
+          setStatusMessage(`Gagal memuat daftar perangkat Bluetooth: ${err}`);
+        }
+      );
+    } else {
+      setStatusMessage('Koneksi native tidak tersedia di peramban standar.');
+    }
+  };
+
+  const connectNativeDevice = async (address: string): Promise<boolean> => {
+    const btSerial = (window as any).bluetoothSerial;
+    if (!btSerial) return false;
+
+    setIsConnecting(true);
+    setStatusMessage(`Menghubungkan ke printer ${address}...`);
+
+    return new Promise((resolve) => {
+      btSerial.connect(
+        address,
+        () => {
+          setIsConnected(true);
+          setIsConnecting(false);
+          const dev = pairedDevices.find((d) => d.address === address);
+          setConnectedDeviceName(dev ? dev.name : 'Printer Bluetooth Classic');
+          setStatusMessage(`Printer ${dev ? dev.name : address} berhasil terhubung! Siap mencetak.`);
+          localStorage.setItem('connected_native_address', address);
+          resolve(true);
+        },
+        (err: any) => {
+          setIsConnected(false);
+          setIsConnecting(false);
+          setStatusMessage(`Gagal menghubungkan ke printer: ${err}`);
+          resolve(false);
+        }
+      );
+    });
+  };
+
+  // --- WEB BLUETOOTH METHOD IMPLEMENTATIONS ---
   const connect = async (): Promise<boolean> => {
+    // If cordova bluetoothSerial is active, let them use list/dropdown instead of Web Bluetooth BLE popup
+    if (isNative) {
+      refreshNativeDevices();
+      return true;
+    }
+
     setIsConnecting(true);
     setIsPolicyBlocked(false);
-    setStatusMessage('Membuka dialog pencarian perangkat Bluetooth...');
+    setStatusMessage('Membuka dialog pencarian perangkat Bluetooth BLE...');
 
     if (typeof navigator === 'undefined' || !('bluetooth' in navigator)) {
       setIsConnecting(false);
-      setStatusMessage('Web Bluetooth API tidak didukung pada browser ini. Pastikan menggunakan Chrome di Android.');
+      setStatusMessage('Web Bluetooth API tidak didukung pada browser ini. Pastikan menggunakan Chrome.');
       return false;
     }
 
@@ -126,7 +236,6 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
         throw new Error('Gagal membuka koneksi GATT ke printer.');
       }
 
-      // Search for writable print characteristic
       let foundChar: any = null;
       try {
         const services = await server.getPrimaryServices();
@@ -149,7 +258,7 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
       }
 
       setIsConnected(true);
-      setStatusMessage(`Terhubung ke ${devName}! Siap mencetak langsung kapan saja.`);
+      setStatusMessage(`Terhubung ke ${devName}! Siap mencetak langsung.`);
       setIsConnecting(false);
       return true;
     } catch (err: any) {
@@ -160,7 +269,7 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
         setStatusMessage('Pencarian dibatalkan oleh pengguna.');
       } else if (err.message?.includes('permissions policy') || err.message?.includes('disallowed')) {
         setIsPolicyBlocked(true);
-        setStatusMessage('Izin Bluetooth dibatasi oleh frame preview browser. Buka aplikasi di tab baru Google Chrome.');
+        setStatusMessage('Izin Bluetooth dibatasi oleh frame preview browser.');
       } else {
         setStatusMessage(`Gagal terhubung: ${err.message || 'Perangkat tidak merespons'}`);
       }
@@ -169,77 +278,102 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
   };
 
   const disconnect = () => {
-    if (device && device.gatt?.connected) {
-      device.gatt.disconnect();
+    if (isNative) {
+      const btSerial = (window as any).bluetoothSerial;
+      if (btSerial) {
+        btSerial.disconnect();
+      }
+      localStorage.removeItem('connected_native_address');
+    } else {
+      if (device && device.gatt?.connected) {
+        device.gatt.disconnect();
+      }
+      setDevice(null);
+      setPrintCharacteristic(null);
     }
-    setDevice(null);
-    setConnectedDeviceName(null);
+
     setIsConnected(false);
-    setPrintCharacteristic(null);
+    setConnectedDeviceName(null);
     setStatusMessage('Koneksi printer diputuskan.');
   };
 
-  // Direct print job
-  const printReceipt = async (receipt: ReceiptData, customWidth?: 32 | 48, logoBytes?: Uint8Array | null): Promise<boolean> => {
+  // --- CONSOLIDATED PRINT ENGINE ---
+  const printReceipt = async (
+    receipt: ReceiptData,
+    customWidth?: 32 | 48,
+    logoBytes?: Uint8Array | null
+  ): Promise<boolean> => {
     const width = customWidth || paperWidth;
     const escPosBytes = generateEscPosBytes(receipt, width, { cutPaper, feedLines, logoBytes });
 
     setIsPrinting(true);
     setStatusMessage(`Mengirim data cetak (${escPosBytes.length} bytes)...`);
 
-    try {
-      // If GATT characteristic is active, transmit packets
-      if (printCharacteristic) {
-        const chunkSize = 100;
-        for (let i = 0; i < escPosBytes.length; i += chunkSize) {
-          const chunk = escPosBytes.slice(i, i + chunkSize);
-          if (printCharacteristic.writeValueWithoutResponse) {
-            await printCharacteristic.writeValueWithoutResponse(chunk);
-          } else {
-            await printCharacteristic.writeValue(chunk);
-          }
-          await new Promise((r) => setTimeout(r, 20));
-        }
-        setStatusMessage('Struk berhasil dicetak ke printer! ✅');
+    // Scenario A: Native Direct Printing via cordova-plugin-bluetooth-serial (ArrayBuffer support)
+    if (isNative) {
+      const btSerial = (window as any).bluetoothSerial;
+      if (!btSerial) {
+        setStatusMessage('Native printer driver tidak ditemukan.');
         setIsPrinting(false);
-        return true;
+        return false;
       }
 
-      // If GATT is connected but characteristic wasn't cached, try reconnecting or re-fetching
-      if (device && device.gatt?.connected) {
+      return new Promise((resolve) => {
+        btSerial.write(
+          escPosBytes.buffer,
+          () => {
+            setStatusMessage('Struk berhasil dicetak natively! ✅');
+            setIsPrinting(false);
+            resolve(true);
+          },
+          (err: any) => {
+            console.error('Native printing failed:', err);
+            setStatusMessage(`Cetak gagal secara native: ${err}`);
+            setIsPrinting(false);
+            resolve(false);
+          }
+        );
+      });
+    }
+
+    // Scenario B: Web Bluetooth GATT transmission (chunked packets)
+    try {
+      let activeChar = printCharacteristic;
+
+      if (!activeChar && device && device.gatt?.connected) {
         const server = device.gatt;
         const services = await server.getPrimaryServices();
-        let foundChar: any = null;
         for (const service of services) {
           const characteristics = await service.getCharacteristics();
           for (const char of characteristics) {
             if (char.properties.write || char.properties.writeWithoutResponse) {
-              foundChar = char;
+              activeChar = char;
               break;
             }
           }
-          if (foundChar) break;
+          if (activeChar) break;
         }
-
-        if (foundChar) {
-          setPrintCharacteristic(foundChar);
-          const chunkSize = 100;
-          for (let i = 0; i < escPosBytes.length; i += chunkSize) {
-            const chunk = escPosBytes.slice(i, i + chunkSize);
-            if (foundChar.writeValueWithoutResponse) {
-              await foundChar.writeValueWithoutResponse(chunk);
-            } else {
-              await foundChar.writeValue(chunk);
-            }
-            await new Promise((r) => setTimeout(r, 20));
-          }
-          setStatusMessage('Struk berhasil dicetak ke printer! ✅');
-          setIsPrinting(false);
-          return true;
+        if (activeChar) {
+          setPrintCharacteristic(activeChar);
         }
       }
 
-      // Fallback: If device is not connected via GATT
+      if (activeChar) {
+        const chunkSize = 100;
+        for (let i = 0; i < escPosBytes.length; i += chunkSize) {
+          const chunk = escPosBytes.slice(i, i + chunkSize);
+          if (activeChar.writeValueWithoutResponse) {
+            await activeChar.writeValueWithoutResponse(chunk);
+          } else {
+            await activeChar.writeValue(chunk);
+          }
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        setStatusMessage('Struk berhasil dicetak! ✅');
+        setIsPrinting(false);
+        return true;
+      }
+
       setStatusMessage('Printer belum terhubung. Silakan hubungkan printer terlebih dahulu.');
       setIsPrinting(false);
       return false;
@@ -248,20 +382,6 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
       setStatusMessage(`Gagal mencetak: ${err.message || 'Koneksi terputus'}`);
       setIsPrinting(false);
       return false;
-    }
-  };
-
-  // Print via RawBT / Android intent
-  const printViaRawBT = (receipt: ReceiptData, customWidth?: 32 | 48) => {
-    try {
-      const width = customWidth || paperWidth;
-      const text = formatReceiptToThermalText(receipt, width);
-      const base64Data = btoa(unescape(encodeURIComponent(text)));
-      const rawBtUrl = `rawbt:base64,${base64Data}`;
-      window.location.href = rawBtUrl;
-      setStatusMessage('Mengirim ke aplikasi printer RawBT...');
-    } catch (e: any) {
-      setStatusMessage('Gagal membuka intent RawBT: ' + e.message);
     }
   };
 
@@ -284,8 +404,12 @@ export const BluetoothPrinterProvider: React.FC<{ children: ReactNode }> = ({ ch
         connect,
         disconnect,
         printReceipt,
-        printViaRawBT,
         setStatusMessage,
+        // Native properties
+        isNative,
+        pairedDevices,
+        connectNativeDevice,
+        refreshNativeDevices,
       }}
     >
       {children}
