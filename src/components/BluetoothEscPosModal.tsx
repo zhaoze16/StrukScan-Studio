@@ -219,7 +219,46 @@ export const BluetoothEscPosModal: React.FC<BluetoothEscPosModalProps> = ({
             </div>
           )}
 
-          {/* Status Box */}
+          {/* STATUS DEVICE BLOCK (FOR LINUX/TAURI) */}
+          {typeof window !== 'undefined' && (window as any).__TAURI__ && (
+            <div className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/30 space-y-4 shadow-lg mb-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-emerald-500/10 rounded-lg">
+                    <Laptop className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-100 text-sm">Driver Port Linux Desktop</h3>
+                    <p className="text-[10px] text-slate-400">Jalur device printer thermal pada <code className="text-emerald-400">/dev/usb/lp0</code></p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    defaultValue="/dev/usb/lp0"
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono w-28"
+                  />
+                  <button className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-emerald-400 text-xs font-semibold">
+                    <RefreshCw className="w-3 h-3" /> Cek Port
+                  </button>
+                </div>
+              </div>
+              <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-emerald-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Status Device: <span className="font-bold">Siap Ditulis (Ready)</span></span>
+                </div>
+                <button
+                  onClick={handleSendPrintJob}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-white text-xs font-bold"
+                >
+                  <Send className="w-3.5 h-3.5" /> Test Cetak
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Existing Status Box & Bluetooth Logic */}
           <div
             className={`p-3.5 rounded-xl border flex items-start gap-3 ${
               isConnected
